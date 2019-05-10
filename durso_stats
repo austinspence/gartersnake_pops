@@ -1,1 +1,181 @@
+## Gartersnake stats
+## Andrew Durso
+
+
+rm(list=ls())
+setwd("D:\\Project_CacheValley_Thamnophis")
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(car)
+library(e1071)
+library(corrplot)
+library(lubridate)
+library(gtable)
+
+d <- read.csv("cache-thamnophis.csv")
+
+names(d) <- c("id","date","year","season","subsite","site","juv.sex",
+              "sex","sex.juv.only","cort_bl","cort_ps","mass","svl","tl",
+              "bka_bl","bka_ps","test","species","glu_bl","glu_ps","notes")
+
+d$id <- as.factor(as.character(d$id))
+d$date <- as.Date(as.character(d$date),format="%m/%d/%Y")
+
+# deal with sexes & ages
+d$sexage <- paste(d$juv.sex,d$sex,d$sex.juv.only)
+d$age[d$sex == "NEO"|d$sex == "JUV"] <- 'juv'
+d$age <- 'adult'; d$age[grepl("JUV",d$sexage) == T] <- 'juv'
+d <- dplyr::select(d, -c(juv.sex,sex,sex.juv.only))
+d$sex <- NA
+d$sex[grepl("M",d$sexage) == T] <- 'male'
+d$sex[grepl("F",d$sexage) == T] <- 'female'
+d <- dplyr::select(d, -c(sexage))
+
+d$svl[d$svl == 44] <- 440
+d$mass[d$mass == '77(65)'] <- 65 ## 77 is mass with food (10 minnows), 65 is mass without
+d$mass <- as.numeric(d$mass)
+d$glu_bl[d$glu_bl == 'LO'] <- NA ## TODO: check this with Lori
+d$glu_bl <- as.numeric(d$glu_bl)
+d$glu_ps[d$glu_ps == 'LO'] <- NA ## TODO: check this with Lori
+d$glu_ps <- as.numeric(d$glu_ps)
+d$bka_bl[d$bka_bl > 100] <- 100 ## TODO: check this with Lori
+d$bka_ps[d$bka_ps > 100] <- 100 ## TODO: check this with Lori
+
+d$cort_react <- d$cort_ps-d$cort_bl
+
+hist(d$svl[d$age == 'juv']); min(d$svl[d$age == 'juv'],na.rm=T); max(d$svl[d$age == 'juv'],na.rm=T)
+hist(d$svl[d$age == 'adult']); min(d$svl[d$age == 'adult'],na.rm=T); max(d$svl[d$age == 'adult'],na.rm=T)
+
+ggplot(d,aes(x=svl,fill=age))+geom_histogram()
+
+## meteorological data
+
+precip <- read.csv('total-precip.csv')
+temp <- read.csv('avg-temp.csv')
+
+m.precip <- melt(precip,id.vars = 'Year')
+m.precip.ann <- m.precip[m.precip$variable=='Annual',]
+d$annprecip <- m.precip.ann[match(d$year,m.precip.ann$Year),"value"]
+d$month <-  month.abb[month(as.POSIXlt(d$date, format="%Y-%m-%d"))]
+d$moyr <- paste(d$month,d$year)
+m.precip$moyr <- paste(m.precip$variable,m.precip$Year)
+d$moprecip <- m.precip[match(d$moyr,m.precip$moyr),"value"]
+
+# TODO: check that most JUV are smaller than most adults
+
+table(d$species,d$sex)
+table(d$species,d$sex,d$age)
+table(d$species,d$sex,d$site)
+
+d2 <- na.omit(d, cols=c("sex", "species"))
+
+sir <- d[d$species == "SIR",]
+ele <- d[d$species == "ELE",]
+
+#### checks for normality (nothing is normal)
+
+normal <- apply(d[,c(7:14,16:17)], 2, shapiro.test)
+capture.output(normal,file="normal.txt")
+
+normal2 <- apply(ele[,c(7:14,16:17)], 2, shapiro.test)
+capture.output(normal2,file="normal_elegans.txt")
+
+normal3 <- apply(sir[,c(7:14,16:17)], 2, shapiro.test)
+capture.output(normal3,file="normal_sirtalis.txt")
+
+# skewness should be close to 0 (-2 to 2), kurtosis close to 3
+
+skewness(d$svl,na.rm = T)
+kurtosis(d$svl,na.rm = T)
+hist(d$svl)
+scatterplot(d$svl,d$mass)
+
+#### plots
+
+ggplot(d,aes(x=date,y=cort_bl,color=species))+geom_point()+facet_grid(species~sex)
+
+ggplot(d,aes(x=date,y=cort_bl,color=species))+geom_point()+facet_grid(year~species)
+
+ggplot(d,aes(x=date,y=bka_bl))+geom_point()+facet_grid(species~sex)
+
+ggplot(d,aes(x=date,y=test,color=species))+geom_point()+facet_grid(year~species)
+
+ggplot(d,aes(x=date,y=cort_react,color=species))+geom_point()+facet_grid(species~sex)
+
+#### stats
+
+summary(lm(cort_bl~date*sex,ele))
+summary(lm(cort_bl~date*sex,sir))
+
+# trade-offs?
+summary(lm(cort_bl~bka_bl*sex,ele))
+summary(lm(cort_bl~bka_ps*sex,ele))
+summary(lm(cort_ps~bka_bl*sex,ele))
+summary(lm(cort_ps~bka_ps*sex,ele))
+summary(lm(cort_react~bka_bl*sex,ele))
+summary(lm(cort_react~bka_ps*sex,ele))
+summary(lm(test~bka_bl,ele))
+summary(lm(test~cort_bl,ele))
+summary(lm(test~cort_react,ele))
+summary(lm(glu_bl~bka_bl,ele))
+summary(lm(glu_bl~cort_bl,ele))
+summary(lm(glu_bl~cort_react,ele))
+summary(lm(glu_ps~bka_ps,ele))
+summary(lm(glu_ps~cort_ps,ele))
+summary(lm(glu_ps~cort_react,ele))
+
+# trade-offs?
+summary(lm(cort_bl~bka_bl*sex,sir))
+summary(lm(cort_bl~bka_ps*sex,sir))
+summary(lm(cort_ps~bka_bl*sex,sir))
+summary(lm(cort_ps~bka_ps*sex,sir))
+summary(lm(cort_react~bka_bl*sex,sir))
+summary(lm(cort_react~bka_ps*sex,sir))        
+summary(lm(test~bka_bl,sir))
+summary(lm(test~cort_bl,sir))
+summary(lm(test~cort_react,sir))
+summary(lm(glu_bl~bka_bl,sir))
+summary(lm(glu_bl~cort_bl,sir))
+summary(lm(glu_bl~cort_react,sir))
+summary(lm(glu_ps~bka_ps,sir))
+summary(lm(glu_ps~cort_ps,sir))
+summary(lm(glu_ps~cort_react,sir))
+
+# correlations
+contvars <- c("cort_bl","cort_ps","mass","svl",
+              "bka_bl","bka_ps","test","glu_bl","glu_ps","cort_react")
+ele.c <- ele[contvars]
+res <- cor(ele.c, method = "pearson", use = "complete.obs")
+round(res, 2)
+corrplot(res, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+
+sir.c <- sir[contvars]
+res2 <- cor(sir.c, method = "pearson", use = "complete.obs")
+round(res2, 2)
+corrplot(res2, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+
+# weather data plots
+
+summary(lm(bka_bl~moprecip*sex,ele))
+summary(lm(bka_bl~moprecip*sex,sir))
+ggplot(d,aes(x=moprecip,y=bka_bl,color=species))+geom_point()+facet_grid(species~sex)
+
+summary(lm(cort_bl~moprecip*sex,ele))
+summary(lm(cort_bl~moprecip*sex,sir))
+ggplot(d,aes(x=moprecip,y=cort_bl,color=species))+geom_point()+facet_grid(species~sex)
+
+# summary(lm(cort_react~moprecip*sex,ele))
+# summary(lm(cort_react~moprecip*sex,sir))
+# ggplot(d,aes(x=moprecip,y=cort_react,color=species))+geom_point()
+
+summary(lm(test~moprecip,ele))
+summary(lm(test~moprecip,sir))
+ggplot(d,aes(x=moprecip,y=test))+geom_point()
+
+summary(lm(glu_bl~moprecip*sex,ele))
+summary(lm(glu_bl~moprecip*sex,sir))
+ggplot(d,aes(x=moprecip,y=glu_bl,color=species))+geom_point()+facet_grid(species~sex)
 
