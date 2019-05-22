@@ -1,5 +1,5 @@
 rm(list=ls())
-setwd("E:\\Project_CacheValley_Thamnophis")
+setwd("D:\\Project_CacheValley_Thamnophis")
 library(reshape2)
 library(ggplot2)
 library(dplyr)
@@ -44,6 +44,8 @@ d$cort_bl[d$cort_bl > 300] <- NA ## TODO: check if taking out this outliers is O
 
 d$cort_react <- d$cort_ps-d$cort_bl
 d$bka_react <- d$bka_ps-d$bka_bl
+Z<-lm(svl~mass,data=d)
+d[names(Z$residuals),"bodycon"]<-Z$residuals
 
 hist(d$svl[d$age == 'juv']); min(d$svl[d$age == 'juv'],na.rm=T); max(d$svl[d$age == 'juv'],na.rm=T)
 hist(d$svl[d$age == 'adult']); min(d$svl[d$age == 'adult'],na.rm=T); max(d$svl[d$age == 'adult'],na.rm=T)
@@ -148,6 +150,8 @@ scatterplot(d$svl,d$mass)
 
 #### plots
 
+ggplot(d,aes(x=date,y=bodycon,color=species))+geom_point()+facet_grid(species~sex)
+
 ggplot(d,aes(x=date,y=cort_bl,color=species))+geom_point()+facet_grid(species~sex)
 
 ggplot(d,aes(x=date,y=cort_bl,color=species))+geom_point()+facet_grid(year~species)
@@ -168,6 +172,9 @@ summary(lm(svl~site,sirM))
 
 summary(lm(mass~site,eleM))
 summary(lm(mass~site,sirM))
+
+summary(lm(bodycon~site,eleM))
+summary(lm(bodycon~site,sirM))
 
 summary(lm(cort_bl~site,eleM))
 summary(lm(cort_bl~site,sirM))
@@ -205,14 +212,34 @@ summary(lm(bka_ps~species,d4M))
 summary(lm(glu_ps~species,d4M))
 summary(lm(cort_react~species,d4M))
 
-d4Mm <- melt(d4M,idvars=c('id','season','subsite','site','species','notes','age','sex',
-                          'month','moyr','date','year'))
-vars <- c('cort_bl','bka_bl','glu_bl','test','cort_ps','bka_ps','glu_ps','cort_react','mass','svl')
-d4Mm <- d4Mm[d4Mm$variable %in% vars,]
+# d4Mm <- melt(d4M,idvars=c('id','season','subsite','site','species','notes','age','sex',
+#                           'month','moyr','date','year'))
+# d4Mm <- d4Mm[d4Mm$variable %in% vars,]
 #d4Mm$vars <- as.factor(d4Mm$vars,) # TODO: reorder factor levels as in vars
-ggplot(d4Mm,aes(x=d4Mm$value,fill=species))+
-  geom_bar(stat='count')+
-  facet_wrap(variable~.,scales="free")
+
+vars <- c('cort_bl','bka_bl','glu_bl','test','cort_ps','bka_ps','glu_ps','cort_react','bka_react','mass','svl','bodycon')
+
+e <- reshape2::melt(d4M, id.vars = c('id','season','subsite','site','species','notes','age','sex',
+                                     'month','moyr','date','year'))
+e <- e[e$variable %in% vars,]
+
+e$variable <- factor(e$variable, levels = c('cort_bl','bka_bl','glu_bl','test','cort_ps','bka_ps','glu_ps','cort_react','bka_react','mass','svl','bodycon'))
+
+ggplot(e,aes(x=e$value,fill=species))+
+  facet_wrap(variable~.,scales="free")+
+  geom_histogram()
+
+eS <- droplevels(e[e$species=="SIR",])
+eE <- droplevels(e[e$species=="ELE",])
+
+ggplot(eS,aes(y=eS$value,group=season,fill=season))+
+  facet_wrap(variable~.,scales="free")+
+  geom_boxplot()
+  
+ggplot(eE,aes(y=eE$value,group=season,fill=season))+
+  facet_wrap(variable~.,scales="free")+
+  geom_boxplot()
+
 
 # trade-offs?
 summary(lm(cort_bl~bka_bl*sex,ele))
@@ -249,8 +276,8 @@ summary(lm(glu_ps~cort_ps,sir))
 summary(lm(glu_ps~cort_react,sir))
 
 # correlations
-contvars <- c("cort_bl","cort_ps","mass","svl",
-              "bka_bl","bka_ps","test","glu_bl","glu_ps","cort_react")
+contvars <- c("cort_bl","cort_ps","mass","svl","bodycon",
+              "bka_bl","bka_ps","bka_react","test","glu_bl","glu_ps","cort_react")
 ele.c <- ele[contvars]
 res <- cor(ele.c, method = "pearson", use = "complete.obs")
 round(res, 2)
@@ -304,12 +331,12 @@ ggplot(sirM,aes(x=precip.10,y=glu_ps))+geom_point()
 
 summary(lm(cort_bl~temp.10,sirM))
 summary(lm(cort_bl~temp.10*site,sirM))
-ggplot(sirM,aes(x=temp.10,y=cort_bl))+geom_point()+geom_smooth(method="lm")+
+ggplot(sirM,aes(x=temp.10,y=cort_bl,color=site))+geom_point()+geom_smooth(method="lm")+
   labs(y="T. sirtalis CORT (ng/mL; baseline)",x="Mean Temperature (°C; past 10 days)")
 
 summary(lm(test~precip.10,sirM))
 summary(lm(test~precip.10*site,sirM))
-ggplot(sirM,aes(x=precip.sum.10,y=test))+geom_point()+geom_smooth(method="lm")+
+ggplot(sirM,aes(x=precip.sum.10,y=test,color=site))+geom_point()+geom_smooth(method="lm")+
   labs(y="T. sirtalis T (ng/mL; baseline)",x="Cumulative precipitation (cm; past 10 days)")
 
 summary(lm(glu_ps~temp*site,sirM))
@@ -345,4 +372,42 @@ summary(lm(glu_ps~precip.sum.2*site,eleM))
 summary(lm(glu_ps~precip.sum.3*site,eleM))
 summary(lm(glu_ps~precip.sum.5*site,eleM))
 summary(lm(glu_ps~precip.sum.10*site,eleM))
+
+## seasonality
+
+summary(lm(svl~site*season,eleM))
+summary(lm(svl~site*season,sirM))
+
+summary(lm(mass~site*season,eleM))
+summary(lm(mass~site*season,sirM))
+
+summary(lm(bodycon~site*season,eleM))
+summary(lm(bodycon~site*season,sirM))
+
+summary(lm(cort_bl~site*season,eleM))
+summary(lm(cort_bl~site*season,sirM))
+
+summary(lm(bka_bl~site*season,eleM))
+summary(lm(bka_bl~site*season,sirM))
+
+summary(lm(glu_bl~site*season,eleM))
+summary(lm(glu_bl~site*season,sirM))
+
+summary(lm(test~site*season,eleM))
+summary(lm(test~site*season,sirM))
+
+summary(lm(cort_ps~site*season,eleM))
+summary(lm(cort_ps~site*season,sirM))
+
+summary(lm(bka_ps~site*season,eleM))
+summary(lm(bka_ps~site*season,sirM))
+
+summary(lm(glu_ps~site*season,eleM))
+summary(lm(glu_ps~site*season,sirM))
+
+summary(lm(cort_react~site*season,eleM))
+summary(lm(cort_react~site*season,sirM))
+
+summary(lm(bka_react~site*season,eleM))
+summary(lm(bka_react~site*season,sirM))
 
