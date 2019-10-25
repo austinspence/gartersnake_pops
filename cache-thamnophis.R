@@ -11,7 +11,7 @@ library(gtable)
 library(zoo)
 library(stringr)
 
-d <- read.csv("cache-thamnophis.csv")
+d <- read.csv("cache-thamnophis-data.csv")
 
 names(d) <- c("id","date","year","season","subsite","site","juv.sex",
               "sex","sex.juv.only","cort_bl","cort_ps","mass","svl","tl",
@@ -55,17 +55,24 @@ ggplot(d,aes(x=svl,fill=age))+geom_histogram()
 
 ## meteorological data
 
-precip <- read.csv('total-precip.csv')
+precip <- read.csv('Logan_MonthlyTotalPrecip_2011_2016-in.csv')
 temp <- read.csv('avg-temp.csv')
-clim <- read.csv('logan daily climate data combined.csv')
+clim <- read.csv('logan-climate-data-combined.csv')
 
 m.precip <- melt(precip,id.vars = 'Year')
 m.precip.ann <- m.precip[m.precip$variable=='Annual',]
 d$annprecip <- m.precip.ann[match(d$year,m.precip.ann$Year),"value"]
 d$month <-  month.abb[month(as.POSIXlt(d$date, format="%Y-%m-%d"))]
 d$moyr <- paste(d$month,d$year)
+d$seasyr <- paste(d$season,d$year)
+d$seasyr <- factor(d$seasyr, levels = c('Spring 2011','Fall 2011','Spring 2012',
+                                        'Fall 2012','Spring 2013','Fall 2013',
+                                        'Spring 2014','Fall 2014','Spring 2015',
+                                        'Fall 2015','Spring 2016'))
 m.precip$moyr <- paste(m.precip$variable,m.precip$Year)
 d$moprecip <- m.precip[match(d$moyr,m.precip$moyr),"value"]
+d$moprecip <- d$moprecip*2.54
+
 
 clim$day <- str_pad(as.character(clim$day),2,pad="0")
 #sapply(clim$month,function(x) grep(paste("?i",x,sep=""),month.abb))
@@ -75,6 +82,7 @@ clim$dateP <- as.Date(strptime(clim$date,format="%Y-%b-%d"))
 table(complete.cases(clim))
 
 clim$tempC <- (clim$temp-32)*(5/9)
+clim$precip <- clim$precip.in*2.54
 d$temp <- clim[match(d$date,clim$dateP),"tempC"]
 d$precip <- clim[match(d$date,clim$dateP),"precip"]
 d$snow_depth <- clim[match(d$date,clim$dateP),"snow_depth"]
@@ -118,6 +126,23 @@ table(d$species,d$sex,d$site)
 d2 <- na.omit(d, cols=c("sex", "species"))
 d3 <- droplevels(d[d$site != 'SH',])
 d4 <- droplevels(d3[d3$species != 'UNK',])
+d5 <- droplevels(d4[d4$sex == 'male',])
+
+table <- as.data.frame(table(d5$seasyr,d5$site,d5$species))
+
+summ <- d5 %>%
+  group_by(seasyr,site,species) %>%
+  summarise(mean.svl=round(mean(svl,na.rm=T),0),
+            sd.svl = round(sd(svl,na.rm=T),0),
+            se.svl = round(sd.svl/sqrt(length(svl)),0),
+            ci95.svl = round(se.svl*1.96,0),
+            N.svl = length(svl),
+            mean.mass=round(mean(mass,na.rm=T),0),
+            sd.mass = round(sd(mass,na.rm=T),0),
+            se.mass = round(sd.mass/sqrt(length(mass)),0),
+            ci95.mass = round(se.mass*1.96,0),
+            N.mass = length(mass))
+write.csv(summ,"summary-svl-mass.csv")
 
 sir <- d3[d3$species == "SIR",]
 ele <- d3[d3$species == "ELE",]
@@ -211,6 +236,10 @@ summary(lm(cort_ps~species,d4M))
 summary(lm(bka_ps~species,d4M))
 summary(lm(glu_ps~species,d4M))
 summary(lm(cort_react~species,d4M))
+summary(lm(bka_react~species,d4M))
+summary(lm(svl~species,d4M))
+summary(lm(mass~species,d4M))
+summary(lm(bodycon~species,d4M))
 
 # d4Mm <- melt(d4M,idvars=c('id','season','subsite','site','species','notes','age','sex',
 #                           'month','moyr','date','year'))
@@ -223,23 +252,41 @@ e <- reshape2::melt(d4M, id.vars = c('id','season','subsite','site','species','n
                                      'month','moyr','date','year'))
 e <- e[e$variable %in% vars,]
 
-e$variable <- factor(e$variable, levels = c('cort_bl','bka_bl','glu_bl','test','cort_ps','bka_ps','glu_ps','cort_react','bka_react','mass','svl','bodycon'))
+e$variable <- factor(e$variable,
+                     levels = c('cort_bl','bka_bl','glu_bl','test','cort_ps','bka_ps','glu_ps','cort_react','bka_react','mass','svl','bodycon'),
+                     labels = c('CORT (baseline)','BKA (baseline)','Glucose (baseline)','T','CORT (post-stress)','BKA (post-stress)','Glucose (post-stress)','CORT (??)','BKA (??)','Mass (g)','Snout-vent Length (mm)','Body Condition'))
 
-ggplot(e,aes(x=e$value,fill=species))+
+e$season <- factor(e$season, levels = c('Spring','Fall'))
+
+e$species <- factor(e$species, levels = c('ELE','SIR'), labels = c('T. elegans','T. sirtalis'))
+
+e$value <- as.numeric(e$value)
+  
+ggplot(e,aes(x=value,fill=species))+
   facet_wrap(variable~.,scales="free")+
   geom_histogram()
+
+ggplot(e,aes(y=value,group=species,fill=species))+
+  facet_wrap(variable~.,scales="free")+
+  geom_boxplot()+
+  scale_fill_manual(values = c('#EBC08B','#BC3C1F'))+
+  theme(axis.text.x =  element_blank(), axis.ticks.x =  element_blank(), 
+        axis.title.y = element_blank(), legend.text = element_text(face='italic'))
 
 eS <- droplevels(e[e$species=="SIR",])
 eE <- droplevels(e[e$species=="ELE",])
 
-ggplot(eS,aes(y=eS$value,group=season,fill=season))+
+ggplot(eS,aes(y=value,group=season,fill=season))+
   facet_wrap(variable~.,scales="free")+
-  geom_boxplot()
+  geom_boxplot()+
+  scale_fill_manual(values = c('#a1d76a','#f1a340'))+
+  theme(axis.text.x =  element_blank(), axis.ticks.x =  element_blank(), axis.title.y = element_blank())
   
-ggplot(eE,aes(y=eE$value,group=season,fill=season))+
+ggplot(eE,aes(y=value,group=season,fill=season))+
   facet_wrap(variable~.,scales="free")+
-  geom_boxplot()
-
+  geom_boxplot()+
+  scale_fill_manual(values = c('#a1d76a','#f1a340'))+
+  theme(axis.text.x =  element_blank(), axis.ticks.x =  element_blank(), axis.title.y = element_blank())
 
 # trade-offs?
 summary(lm(cort_bl~bka_bl*sex,ele))
@@ -276,18 +323,19 @@ summary(lm(glu_ps~cort_ps,sir))
 summary(lm(glu_ps~cort_react,sir))
 
 # correlations
-contvars <- c("cort_bl","cort_ps","mass","svl","bodycon",
-              "bka_bl","bka_ps","bka_react","test","glu_bl","glu_ps","cort_react")
+contvars <- c('cort_bl','bka_bl','glu_bl','test','cort_ps','bka_ps','glu_ps','cort_react','bka_react','mass','svl','bodycon')
 ele.c <- ele[contvars]
+colnames(ele.c) <- c('CORT (baseline)','Bactericial ability (baseline)','Glucose (baseline)','T','CORT (post-stress)','Bactericial ability (post-stress)','Glucose (post-stress)','CORT (??)','Bactericial ability (??)','Mass (g)','Snout-vent Length (mm)','Body Condition')
 res <- cor(ele.c, method = "pearson", use = "complete.obs")
 round(res, 2)
-corrplot(res, type = "upper", order = "hclust", 
+corrplot(res, type = "upper", order = "original", 
          tl.col = "black", tl.srt = 45)
 
 sir.c <- sir[contvars]
+colnames(sir.c) <- c('CORT (baseline)','Bactericial ability (baseline)','Glucose (baseline)','T','CORT (post-stress)','Bactericial ability (post-stress)','Glucose (post-stress)','CORT (??)','Bactericial ability (??)','Mass (g)','Snout-vent Length (mm)','Body Condition')
 res2 <- cor(sir.c, method = "pearson", use = "complete.obs")
 round(res2, 2)
-corrplot(res2, type = "upper", order = "hclust", 
+corrplot(res2, type = "upper", order = "original", 
          tl.col = "black", tl.srt = 45)
 
 # weather data plots
@@ -312,9 +360,11 @@ summary(lm(glu_bl~moprecip*sex,ele))
 summary(lm(glu_bl~moprecip*sex,sir))
 ggplot(d,aes(x=moprecip,y=glu_bl,color=species))+geom_point()+facet_grid(species~sex)
 
+
+my_y_title <- expression(paste(italic("T. elegans")," bactericidal ability (%; baseline)"))
 summary(lm(bka_bl~moprecip,eleM))
 ggplot(eleM,aes(x=moprecip,y=bka_bl))+geom_point()+geom_smooth(method="lm")+
-  labs(y="T. elegans BKA (%; baseline)",x="Monthly precipitation")
+  labs(y=my_y_title,x="Monthly precipitation (cm)")
 summary(lm(bka_bl~moprecip,sirM))
 ggplot(sirM,aes(x=moprecip,y=bka_bl))+geom_point()
 
@@ -329,49 +379,61 @@ ggplot(sirM,aes(x=precip.sum.10,y=test))+geom_point()
 ggplot(sirM,aes(x=precip.10,y=glu_bl))+geom_point()
 ggplot(sirM,aes(x=precip.10,y=glu_ps))+geom_point()
 
+my_y_title_2 <- expression(paste(italic("T. sirtalis")," CORT (ng/mL; baseline)"))
 summary(lm(cort_bl~temp.10,sirM))
 summary(lm(cort_bl~temp.10*site,sirM))
-ggplot(sirM,aes(x=temp.10,y=cort_bl,color=site))+geom_point()+geom_smooth(method="lm")+
-  labs(y="T. sirtalis CORT (ng/mL; baseline)",x="Mean Temperature (°C; past 10 days)")
+summary(lm(cort_bl~temp.10*season,sirM))
+summary(lm(cort_bl~temp.10*season*site,sirM))
+ggplot(sirM,aes(x=temp.10,y=cort_bl))+geom_point()+geom_smooth(method="lm")+
+  labs(y=my_y_title_2,x="Mean Temperature (°C; past 10 days)")+xlim(2.5,15)
 
-summary(lm(test~precip.10,sirM))
-summary(lm(test~precip.10*site,sirM))
-ggplot(sirM,aes(x=precip.sum.10,y=test,color=site))+geom_point()+geom_smooth(method="lm")+
-  labs(y="T. sirtalis T (ng/mL; baseline)",x="Cumulative precipitation (cm; past 10 days)")
+my_y_title_3 <- expression(paste(italic("T. sirtalis")," testosterone (ng/mL; baseline)"))
+summary(lm(test~precip.sum.10,sirM))
+summary(lm(test~precip.sum.10*site,sirM))
+summary(lm(test~precip.sum.10*season,sirM))
+summary(lm(test~precip.sum.10*season*site,sirM))
+ggplot(sirM,aes(x=precip.sum.10,y=test,color=season))+geom_point()+geom_smooth(method="lm")+
+  xlim(0,2.6)+
+  scale_color_manual(breaks = c("Spring","Fall"),values = c('#f1a340','#a1d76a'))+
+  labs(y=my_y_title_3,x="Cumulative precipitation (cm; past 10 days)")
+ggplot(sirM,aes(x=precip.sum.10,y=test,color=season))+geom_point()+geom_smooth(method="lm")+
+  xlim(0,3)+facet_grid(~season)+
+  scale_color_manual(values = c('#a1d76a','#f1a340'))+
+  labs(y=my_y_title_3,x="Cumulative precipitation (cm; past 10 days)")
 
-summary(lm(glu_ps~temp*site,sirM))
-summary(lm(glu_ps~temp.1*site,sirM))
-summary(lm(glu_ps~temp.3*site,sirM))
-summary(lm(glu_ps~temp.5*site,sirM))
-summary(lm(glu_ps~temp.10*site,sirM))
+summary(lm(glu_ps~temp*season,sirM))
+summary(lm(glu_ps~temp.1*season,sirM))
+summary(lm(glu_ps~temp.3*season,sirM))
+summary(lm(glu_ps~temp.5*season,sirM))
+summary(lm(glu_ps~temp.10*season,sirM))
 
-summary(lm(glu_ps~precip*site,sirM))
-summary(lm(glu_ps~precip.1*site,sirM))
-summary(lm(glu_ps~precip.3*site,sirM))
-summary(lm(glu_ps~precip.5*site,sirM))
-summary(lm(glu_ps~precip.10*site,sirM))
+summary(lm(glu_ps~precip*season,sirM))
+summary(lm(glu_ps~precip.1*season,sirM))
+summary(lm(glu_ps~precip.3*season,sirM))
+summary(lm(glu_ps~precip.5*season,sirM))
+summary(lm(glu_ps~precip.10*season,sirM))
 
-summary(lm(glu_ps~precip.sum.2*site,sirM))
-summary(lm(glu_ps~precip.sum.3*site,sirM))
-summary(lm(glu_ps~precip.sum.5*site,sirM))
-summary(lm(glu_ps~precip.sum.10*site,sirM))
+summary(lm(glu_ps~precip.sum.2*season,sirM))
+summary(lm(glu_ps~precip.sum.3*season,sirM))
+summary(lm(glu_ps~precip.sum.5*season,sirM))
+summary(lm(glu_ps~precip.sum.10*season,sirM))
 
-summary(lm(glu_ps~temp*site,eleM))
-summary(lm(glu_ps~temp.1*site,eleM))
-summary(lm(glu_ps~temp.3*site,eleM))
-summary(lm(glu_ps~temp.5*site,eleM))
-summary(lm(glu_ps~temp.10*site,eleM))
+summary(lm(glu_ps~temp*season,eleM))
+summary(lm(glu_ps~temp.1*season,eleM))
+summary(lm(glu_ps~temp.3*season,eleM))
+summary(lm(glu_ps~temp.5*season,eleM))
+summary(lm(glu_ps~temp.10*season,eleM))
 
-summary(lm(glu_ps~precip*site,eleM))
-summary(lm(glu_ps~precip.1*site,eleM))
-summary(lm(glu_ps~precip.3*site,eleM))
-summary(lm(glu_ps~precip.5*site,eleM))
-summary(lm(glu_ps~precip.10*site,eleM))
+summary(lm(glu_ps~precip*season,eleM))
+summary(lm(glu_ps~precip.1*season,eleM))
+summary(lm(glu_ps~precip.3*season,eleM))
+summary(lm(glu_ps~precip.5*season,eleM))
+summary(lm(glu_ps~precip.10*season,eleM))
 
-summary(lm(glu_ps~precip.sum.2*site,eleM))
-summary(lm(glu_ps~precip.sum.3*site,eleM))
-summary(lm(glu_ps~precip.sum.5*site,eleM))
-summary(lm(glu_ps~precip.sum.10*site,eleM))
+summary(lm(glu_ps~precip.sum.2*season,eleM))
+summary(lm(glu_ps~precip.sum.3*season,eleM))
+summary(lm(glu_ps~precip.sum.5*season,eleM))
+summary(lm(glu_ps~precip.sum.10*season,eleM))
 
 ## seasonality
 
@@ -410,4 +472,28 @@ summary(lm(cort_react~site*season,sirM))
 
 summary(lm(bka_react~site*season,eleM))
 summary(lm(bka_react~site*season,sirM))
+
+## season & year
+
+summary(lm(svl~site*season,eleM))
+summary(lm(mass~site*season,eleM))
+summary(lm(bodycon~site*season,eleM))
+summary(lm(cort_bl~site*season,eleM))
+summary(lm(bka_bl~site*season,eleM))
+summary(lm(glu_bl~site*season,eleM))
+summary(lm(test~site*season,eleM))
+summary(lm(cort_ps~site*season,eleM))
+summary(lm(bka_ps~site*season,eleM))
+summary(lm(glu_ps~site*season,eleM))
+summary(lm(cort_react~site*season,eleM))
+summary(lm(bka_react~site*season,eleM))
+
+## manova
+
+op <- options(contrasts = c("contr.helmert", "contr.poly"))
+
+npk2.aov <- manova(cbind(cort_bl,bka_bl,glu_bl,test,cort_ps,bka_ps,glu_ps,cort_react,bka_react,mass,svl,bodycon) ~ species * site * season, d4M)
+summary(npk2.aov)
+
+
 
