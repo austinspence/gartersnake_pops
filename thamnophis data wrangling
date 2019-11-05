@@ -1,0 +1,278 @@
+######################################################################
+
+###### Cache Valley Snake Population Physiology Data Wrangling #######
+
+######################################################################
+
+## Created by: Austin Spence
+## Created on: November 4th, 2019
+
+
+### Read in the libraries needed
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(e1071)
+library(corrplot)
+library(lubridate)
+library(gtable)
+library(zoo)
+library(stringr)
+library(lme4)
+library(lmerTest)
+library(psych)
+library(interactions)
+library(MuMIn)
+library(emmeans)
+
+
+#### Clear everything
+rm(list=ls())
+
+
+#### Set working directory
+setwd("/Users/austinspence/Desktop/thamnophis_study/data/raw_data")
+
+
+################################################################
+
+###### Read in the snake physiology data #######
+
+################################################################
+d <- read.csv("cache-thamnophis-data.csv")
+#View(d)
+names(d) <- c("id","date","year","season","subsite","site","juv.sex",
+              "sex","sex.juv.only","cort_bl","cort_ps","mass","svl","tl",
+              "bka_bl","bka_ps","test","species","glu_bl","glu_ps","notes")
+
+d$id <- as.factor(d$id)
+d$date <- as.Date(as.character(d$date),format="%m/%d/%Y")
+
+#### Clean up sex and age categories
+d$sexage <- paste(d$juv.sex,d$sex,d$sex.juv.only)
+d$age[d$sex == "NEO"|d$sex == "JUV"] <- 'juv'
+d$age <- 'adult'; d$age[grepl("JUV",d$sexage) == T] <- 'juv'
+d <- dplyr::select(d, -c(juv.sex,sex,sex.juv.only))
+d$sex <- NA
+d$sex[grepl("M",d$sexage) == T] <- 'male'
+d$sex[grepl("F",d$sexage) == T] <- 'female'
+d <- dplyr::select(d, -c(sexage))
+
+
+#### Clean up data that needs to be converted to the correct unit, NA, remove outliers, etc
+d$svl[d$svl == 44] <- 440
+d$mass[d$mass == '77(65)'] <- 65 ## 77 is mass with food (10 minnows), 65 is mass without
+d$mass <- as.numeric(d$mass)
+d$glu_bl[d$glu_bl == 'LO'] <- NA ## TODO: check this with Lori
+d$glu_bl <- as.numeric(d$glu_bl)
+d$glu_ps[d$glu_ps == 'LO'] <- NA ## TODO: check this with Lori
+d$glu_ps <- as.numeric(d$glu_ps)
+d$bka_bl[d$bka_bl > 100] <- 100 ## TODO: check this with Lori
+d$bka_ps[d$bka_ps > 100] <- 100 ## TODO: check this with Lori
+d$test[d$test > 300] <- NA ## TODO: check if taking out these two outliers is OK with all
+d$cort_bl[d$cort_bl > 300] <- NA ## TODO: check if taking out this outliers is OK with all
+
+#### Create cort and bka reactivity (Poststress - baseline)
+d$cort_react <- d$cort_ps-d$cort_bl
+d$bka_react <- d$bka_ps-d$bka_bl
+
+#### Create condition (residual of snout-vent length ~ mass)
+Z<-lm(svl~mass,data=d)
+d[names(Z$residuals),"bodycon"]<-Z$residuals ## Where are we using this further?
+
+
+#### Make sure juveniles are smaller than adults (mostly)
+hist(d$svl[d$age == 'juv']); min(d$svl[d$age == 'juv'],na.rm=T); max(d$svl[d$age == 'juv'],na.rm=T)
+hist(d$svl[d$age == 'adult']); min(d$svl[d$age == 'adult'],na.rm=T); max(d$svl[d$age == 'adult'],na.rm=T)
+
+# Plot juveniles and adults to check these histograms
+ggplot(d,aes(x=svl,fill=age))+geom_histogram()
+
+
+################################################################
+
+###### Read in the meteorological data #######
+
+################################################################
+
+precip <- read.csv('Logan_MonthlyTotalPrecip_2011_2016-in.csv')
+temp <- read.csv('avg-temp.csv')
+clim <- read.csv('logan-daily-climate-data-combined.csv')
+
+#### Clean up the meteorological data 
+m.precip <- melt(precip,id.vars = 'Year')
+m.precip.ann <- m.precip[m.precip$variable=='Annual',]
+
+
+#### Add the meteorological data to the main snake dataframe
+d$annprecip <- m.precip.ann[match(d$year,m.precip.ann$Year),"value"]
+d$month <-  month.abb[month(as.POSIXlt(d$date, format="%Y-%m-%d"))]
+d$moyr <- paste(d$month,d$year)
+d$seasyr <- paste(d$season,d$year)
+d$seasyr <- factor(d$seasyr, levels = c('Spring 2011','Fall 2011','Spring 2012',
+                                        'Fall 2012','Spring 2013','Fall 2013',
+                                        'Spring 2014','Fall 2014','Spring 2015',
+                                        'Fall 2015','Spring 2016'))
+m.precip$moyr <- paste(m.precip$variable,m.precip$Year)
+d$moprecip <- m.precip[match(d$moyr,m.precip$moyr),"value"]
+
+
+#### Turn precipitation into centimeters
+d$moprecip <- d$moprecip*2.54
+
+
+#### Clean up the climate data
+clim$day <- str_pad(as.character(clim$day),2,pad="0")
+#sapply(clim$month,function(x) grep(paste("?i",x,sep=""),month.abb))
+clim$date <- paste0(clim$year,"-",clim$month,"-",clim$day)
+clim$dateP <- as.Date(strptime(clim$date,format="%Y-%b-%d"))
+#clim$dateP$zone <- NULL
+table(complete.cases(clim))
+
+
+#### Convert the climate data to C and precip to cm
+clim$tempC <- (clim$temp-32)*(5/9)
+clim$precip <- clim$precip.in*2.54
+
+#### Add the climate data to main snake dataframe
+d$temp <- clim[match(d$date,clim$dateP),"tempC"]
+d$precip <- clim[match(d$date,clim$dateP),"precip"]
+d$snow_depth <- clim[match(d$date,clim$dateP),"snow_depth"]
+
+
+#### Create the climate moving averages
+clim$temp.1 <- c(NA,head(clim['tempC'],dim(clim)[1]-1)[[1]]) # shift down by one
+clim$temp.3 <- c(rep(NA,2),rollmean(clim$tempC,3,align='right')) # 3-day moving average
+clim$temp.5 <- c(rep(NA,4),rollmean(clim$tempC,5,align='right')) # 5-day moving average
+clim$temp.10 <- c(rep(NA,9),rollmean(clim$tempC,10,align='right')) # 10-day moving average
+
+clim$precip.1 <- c(NA,head(clim['precip'],dim(clim)[1]-1)[[1]]) # shift down by one
+clim$precip.3 <- c(rep(NA,2),rollmean(clim$precip,3,align='right')) # 3-day moving average
+clim$precip.5 <- c(rep(NA,4),rollmean(clim$precip,5,align='right')) # 5-day moving average
+clim$precip.10 <- c(rep(NA,9),rollmean(clim$precip,10,align='right')) # 10-day moving average
+
+clim$precip.sum.2 <- rollsumr(clim$precip,k=2,fill=NA)
+clim$precip.sum.3 <- rollsumr(clim$precip,k=3,fill=NA)
+clim$precip.sum.5 <- rollsumr(clim$precip,k=5,fill=NA)
+clim$precip.sum.10 <- rollsumr(clim$precip,k=10,fill=NA)
+
+
+#### Add the climate moving averages to the main snake dataframe
+d$temp.1 <- clim[match(d$date,clim$dateP),"temp.1"]
+d$temp.3 <- clim[match(d$date,clim$dateP),"temp.3"]
+d$temp.5 <- clim[match(d$date,clim$dateP),"temp.5"]
+d$temp.10 <- clim[match(d$date,clim$dateP),"temp.10"]
+
+d$precip.1 <- clim[match(d$date,clim$dateP),"precip.1"]
+d$precip.3 <- clim[match(d$date,clim$dateP),"precip.3"]
+d$precip.5 <- clim[match(d$date,clim$dateP),"precip.5"]
+d$precip.10 <- clim[match(d$date,clim$dateP),"precip.10"]
+
+d$precip.sum.2 <- clim[match(d$date,clim$dateP),"precip.sum.2"]
+d$precip.sum.3 <- clim[match(d$date,clim$dateP),"precip.sum.3"]
+d$precip.sum.5 <- clim[match(d$date,clim$dateP),"precip.sum.5"]
+d$precip.sum.10 <- clim[match(d$date,clim$dateP),"precip.sum.10"]
+
+######################################################################
+
+
+#### Look at the data 
+table(d$species,d$sex)
+table(d$species,d$sex,d$age)
+table(d$species,d$sex,d$site)
+
+
+#### Create a csv file of a summary of the morphometrics
+d2 <- na.omit(d, cols=c("sex", "species"))
+d3 <- droplevels(d[d$site != 'SH',])
+d4 <- droplevels(d3[d3$species != 'UNK',])
+d5 <- droplevels(d4[d4$sex == 'male',])
+
+
+table <- as.data.frame(table(d5$seasyr,d5$site,d5$species))
+
+summ <- d5 %>%
+  group_by(seasyr,site,species) %>%
+  summarise(mean.svl=round(mean(svl,na.rm=T),0),
+            sd.svl = round(sd(svl,na.rm=T),0),
+            se.svl = round(sd.svl/sqrt(length(svl)),0),
+            ci95.svl = round(se.svl*1.96,0),
+            N.svl = length(svl),
+            mean.mass=round(mean(mass,na.rm=T),0),
+            sd.mass = round(sd(mass,na.rm=T),0),
+            se.mass = round(sd.mass/sqrt(length(mass)),0),
+            ci95.mass = round(se.mass*1.96,0),
+            N.mass = length(mass))
+write.csv(summ,"morphometrics_summary.csv")
+
+
+#### Create snake species/sex specific dataframes
+sir <- d3[d3$species == "SIR",]
+ele <- d3[d3$species == "ELE",]
+
+sirF <- droplevels(sir[sir$sex == 'female',])
+sirM <- droplevels(sir[sir$sex == 'male',])
+eleF <- droplevels(ele[ele$sex == 'female',])
+eleM <- droplevels(ele[ele$sex == 'male',])
+
+d4M <- droplevels(d4[d4$sex == 'male',])
+d4F <- droplevels(d4[d4$sex == 'female',])
+
+#### checks for normality (nothing is normal)
+
+normal <- apply(d[,c(7:14,16:17)], 2, shapiro.test)
+capture.output(normal,file="normal.txt")
+
+normal2 <- apply(ele[,c(7:14,16:17)], 2, shapiro.test)
+capture.output(normal2,file="normal_elegans.txt")
+
+normal3 <- apply(sir[,c(7:14,16:17)], 2, shapiro.test)
+capture.output(normal3,file="normal_sirtalis.txt")
+
+# skewness should be close to 0 (-2 to 2), kurtosis close to 3
+
+skewness(d$svl,na.rm = T)
+kurtosis(d$svl,na.rm = T)
+hist(d$svl)
+#scatterplot(d$svl,d$mass)
+plot(d$svl~d$mass)
+
+#### Look at plots of different physiological parameters across spp*sex
+
+ggplot(d,aes(x=date,y=bodycon,color=species))+geom_point()+facet_grid(species~sex)
+
+ggplot(d,aes(x=date,y=cort_bl,color=species))+geom_point()+facet_grid(species~sex)
+
+ggplot(d,aes(x=date,y=cort_bl,color=species))+geom_point()+facet_grid(year~species)
+
+ggplot(d,aes(x=date,y=bka_bl))+geom_point()+facet_grid(species~sex)
+
+ggplot(d,aes(x=date,y=test,color=species))+geom_point()+facet_grid(year~species)
+
+ggplot(d,aes(x=date,y=cort_react,color=species))+geom_point()+facet_grid(species~sex)
+
+
+#########REVISED STATS - GRH July 2019###############
+
+eleM$yearFact<-as.factor(eleM$year)
+modelSVL_ele<-lmer(svl~site+year+season+(1|id),data=eleM)
+summary(modelSVL_ele)
+
+plot(modelSVL_ele)
+qqnorm(resid(modelSVL_ele))
+plot(eleM$svl)
+
+#seems to be massive outlier (snake id = 977 has SVL of 943 (next biggest is 650)). Am removing for now.
+eleM1<-eleM[!(eleM$id=="977"),]
+plot(eleM1$svl)
+
+#visualizing...
+plot(svl~interaction(season,yearFact),data=eleM1,xlab="year and season")
+
+
+elegans <- eleM1
+sirtalis <- sirM
+
+
+write.csv(elegans,"elegans.csv")
+write.csv(sirtalis,"sirtalis.csv")
