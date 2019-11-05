@@ -46,7 +46,7 @@ names(d) <- c("id","date","year","season","subsite","site","juv.sex",
               "bka_bl","bka_ps","test","species","glu_bl","glu_ps","notes")
 
 d$id <- as.factor(d$id)
-d$date <- as.Date(as.character(d$date),format="%m/%d/%Y")
+d$date <- as.Date(as.character(d$date),format="%m/%d/%y")
 
 #### Clean up sex and age categories
 d$sexage <- paste(d$juv.sex,d$sex,d$sex.juv.only)
@@ -78,7 +78,7 @@ d$bka_react <- d$bka_ps-d$bka_bl
 
 #### Create condition (residual of snout-vent length ~ mass)
 Z<-lm(svl~mass,data=d)
-d[names(Z$residuals),"bodycon"]<-Z$residuals ## Where are we using this further?
+d[names(Z$residuals),"bodycon"]<-Z$residuals 
 
 
 #### Make sure juveniles are smaller than adults (mostly)
@@ -123,10 +123,10 @@ d$moprecip <- d$moprecip*2.54
 
 #### Clean up the climate data
 clim$day <- str_pad(as.character(clim$day),2,pad="0")
-#sapply(clim$month,function(x) grep(paste("?i",x,sep=""),month.abb))
+sapply(clim$month,function(x) grep(paste("?i",x,sep=""),month.abb))
 clim$date <- paste0(clim$year,"-",clim$month,"-",clim$day)
 clim$dateP <- as.Date(strptime(clim$date,format="%Y-%b-%d"))
-#clim$dateP$zone <- NULL
+clim$dateP$zone <- NULL
 table(complete.cases(clim))
 
 
@@ -276,3 +276,4 @@ sirtalis <- sirM
 
 write.csv(elegans,"elegans.csv")
 write.csv(sirtalis,"sirtalis.csv")
+
