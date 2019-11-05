@@ -71,6 +71,7 @@ d$bka_bl[d$bka_bl > 100] <- 100 ## TODO: check this with Lori
 d$bka_ps[d$bka_ps > 100] <- 100 ## TODO: check this with Lori
 d$test[d$test > 300] <- NA ## TODO: check if taking out these two outliers is OK with all
 d$cort_bl[d$cort_bl > 300] <- NA ## TODO: check if taking out this outliers is OK with all
+d<-d[!(d$id=="977"),] #SVL of 943 (next biggest is 650)) - removing for now
 
 #### Create cort and bka reactivity (Poststress - baseline)
 d$cort_react <- d$cort_ps-d$cort_bl
@@ -100,8 +101,9 @@ temp <- read.csv('avg-temp.csv')
 clim <- read.csv('logan-daily-climate-data-combined.csv')
 
 #### Clean up the meteorological data 
+precip$annual <- rowSums(precip[,c(2:13)])
 m.precip <- melt(precip,id.vars = 'Year')
-m.precip.ann <- m.precip[m.precip$variable=='Annual',]
+m.precip.ann <- m.precip[m.precip$variable=='annual',]
 
 
 #### Add the meteorological data to the main snake dataframe
@@ -126,7 +128,7 @@ clim$day <- str_pad(as.character(clim$day),2,pad="0")
 sapply(clim$month,function(x) grep(paste("?i",x,sep=""),month.abb))
 clim$date <- paste0(clim$year,"-",clim$month,"-",clim$day)
 clim$dateP <- as.Date(strptime(clim$date,format="%Y-%b-%d"))
-clim$dateP$zone <- NULL
+#clim$dateP$zone <- NULL
 table(complete.cases(clim))
 
 
@@ -252,28 +254,11 @@ ggplot(d,aes(x=date,y=test,color=species))+geom_point()+facet_grid(year~species)
 ggplot(d,aes(x=date,y=cort_react,color=species))+geom_point()+facet_grid(species~sex)
 
 
-#########REVISED STATS - GRH July 2019###############
+#### Create working dataframes
 
-eleM$yearFact<-as.factor(eleM$year)
-modelSVL_ele<-lmer(svl~site+year+season+(1|id),data=eleM)
-summary(modelSVL_ele)
-
-plot(modelSVL_ele)
-qqnorm(resid(modelSVL_ele))
-plot(eleM$svl)
-
-#seems to be massive outlier (snake id = 977 has SVL of 943 (next biggest is 650)). Am removing for now.
-eleM1<-eleM[!(eleM$id=="977"),]
-plot(eleM1$svl)
-
-#visualizing...
-plot(svl~interaction(season,yearFact),data=eleM1,xlab="year and season")
-
-
-elegans <- eleM1
+elegans <- eleM
 sirtalis <- sirM
 
 
-write.csv(elegans,"elegans.csv")
-write.csv(sirtalis,"sirtalis.csv")
-
+write.csv(elegans,"../working_data/elegans.csv")
+write.csv(sirtalis,"../working_data/sirtalis.csv")
